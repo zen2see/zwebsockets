@@ -3,8 +3,8 @@ const wsocket = new WebSocket('ws://localhost:8081')
 
 // 2. Define the message structure to match the serve
 interface SocketMessage {
-    type: string;
-    content: string;
+    type: 'chat' | 'userList';
+    content: any;
     sender?: string; // Optional - we don't know until server sends it
 }
 
@@ -13,7 +13,7 @@ wsocket.addEventListener('open', () => {
      console.log('%c Connected to Broadcast Server ', 
         'background: #222; color: #bada55')
     const initialData: SocketMessage = { 
-        type: 'BroadcastChat', 
+        type: 'chat',
         content: 'Hello everyone! I just joined.'
 
     };
@@ -22,21 +22,23 @@ wsocket.addEventListener('open', () => {
     wsocket.send(JSON.stringify(initialData));
 });
 
+
 // 4. Listen for incoming broadcasts from the server
+// 
 wsocket.addEventListener('message', (event: MessageEvent) => {
     try {
-        // Parse the JSON string sent by the server
         const data: SocketMessage = JSON.parse(event.data);
 
-        // Display the message with the sender's name
-        // Example output: [User-432]: Hello everyone!
-        console.log(`%c[${data.sender}]: %c${data.content}`, 'font-weight: bold; color: blue', 'color: black');
-        
-    } catch (error) {
-        // Fallback for non-JSON messages (like a "Welcome" string)
-        console.log('Raw message received:', event.data);
+        if (data.type === 'userList') {
+            // content is an array of usernames: ["User-1", "User-2"]
+            console.log('%c ONLINE USERS: ' + data.content.join(', '), 'color: green; font-weight: bold');
+        } else if (data.type === 'chat') {
+            console.log(`[${data.sender}]: ${data.content}`);
+        }
+    } catch (e) {
+        console.log('Raw:', event.data);
     }
-});
+})
 
 
 // 5. Good practice: Add an error listener to catch connection issues

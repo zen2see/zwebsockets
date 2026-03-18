@@ -66,18 +66,41 @@ interface CustomWebSocket extends WebSocket {
 
 // Define the interface for consistent data structure
 interface SocketMessage {
-    type: string;
-    content: string;
+    type: 'chat' | 'userlist'
+    content: any;
     sender?: string; // Added to identify who sent what
 }
 
 const wss = new WebSocketServer({ port: 8081 })
 console.log('Server running on ws://localhost:8081')
 
+// Helper to send the current list of online users to everyone
+const broadcastUserList = () => {
+    const users: string[] = [];
+    wss.clients.forEach((client: CustomWebSocket) => {
+        if (client.username) users.push(client.username);
+    });
+
+    const listMessage: SocketMessage = {
+        type: 'userlist',
+        content: users
+    };
+
+    const payload = JSON.stringify(listMessage);
+    wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(payload);
+        }
+    });
+};
+
 wss.on('connection', (ws: CustomWebSocket) => {
     // Assign a random username (e.g., User-482)
     ws.username = `User-${Math.floor(Math.random() * 1000)}`
     console.log(`${ws.username} joined the chat.`)
+
+     // Send the updated list now that someone new joined
+    broadcastUserList();
 
     ws.on('message', (data: string) => {
         try {
@@ -86,7 +109,7 @@ wss.on('connection', (ws: CustomWebSocket) => {
              
             // Build the broadcast message with the assigned username
             const broadcastData: SocketMessage = {
-                type: 'BroadcastChat',
+                type: 'chat',
                 content: parsed.content,
                 sender: ws.username,  
             };
@@ -107,7 +130,11 @@ wss.on('connection', (ws: CustomWebSocket) => {
         }
     });
 
-    ws.on('close', () => console.log(`${ws.username} left.`))
+    ws.on('close', () => {
+         console.log(`${ws.username} left.`)
+        // Update the list again because someone left
+        broadcastUserList()
+    })
 });
 
 
@@ -121,7 +148,7 @@ wss.on('connection', (ws: CustomWebSocket) => {
 //     }
 // }
 
-console.log('Broadcast Server running on ws://localhost:8081');
+console.log('Server with User List running on ws://localhost:8081');
 // wss.on('connection', (ws) => {
 //     console.log('Client cConnected')
 //     ws.send('Welcome!')
