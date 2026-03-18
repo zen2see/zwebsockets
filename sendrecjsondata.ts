@@ -1,56 +1,105 @@
+import * as readline from 'readline';
+
 // 1. Connect to your local server
 const wsocket = new WebSocket('ws://localhost:8081')
 
 // 2. Define the message structure to match the serve
 interface SocketMessage {
-    type: 'chat' | 'userList';
-    content: any;
-    sender?: string; // Optional - we don't know until server sends it
+    type: string;
+    content?: any;
+    sender?: string;
+    target?: string;
+    isTyping?: boolean;
 }
 
-// 3. When the connection opens, send a test message
-wsocket.addEventListener('open', () => {
-     console.log('%c Connected to Broadcast Server ', 
-        'background: #222; color: #bada55')
-    const initialData: SocketMessage = { 
-        type: 'chat',
-        content: 'Hello everyone! I just joined.'
 
-    };
-
-    // Always stringify before sending
-    wsocket.send(JSON.stringify(initialData));
-});
-
-
-// 4. Listen for incoming broadcasts from the server
-// 
+// 3. Command Handler
+// To Broadcast: sendMessage("Hello!") or sendMessage("/all Hi!")
+// To Private:  sendMessage("/msg User-123 Secret")
+function sendMessage(input: string) {
+    // 1. Check for Private Message: /msg [username] [message]
+    if (input.startsWith('/msg ')) {
+        const parts = input.split(' ');
+        // parts[0] is "/msg"
+        // parts[1] is the username (e.g., "User-123")
+        // parts[2...] is the message
+        const targetUser = parts[1]; 
+        const messageContent = parts.slice(2).join(' ');
+        if (!targetUser || !messageContent) {
+            console.error('Usage: /msg [username] [message]');
+            return;
+        }
+         wsocket.send(JSON.stringify({
+            type: 'private',
+            target: targetUser,
+            content: messageContent
+        }));
+    } else {
+        wsocket.send(JSON.stringify({
+            type: 'chat',
+            content: input
+        }));
+    }
+}
+    
+// 4. TYPING STATUS
+let typingTimer: any;
+function handleTyping() {
+    wsocket.send(JSON.stringify({ type: 'typing', isTyping: true }));
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => {
+        wsocket.send(JSON.stringify({ type: 'typing', isTyping: false }));
+    }, 2000);
+}
+// 5. Receiving logic (Inbund Messages)
 wsocket.addEventListener('message', (event: MessageEvent) => {
     try {
         const data: SocketMessage = JSON.parse(event.data);
 
-        if (data.type === 'userList') {
-            // content is an array of usernames: ["User-1", "User-2"]
-            console.log('%c ONLINE USERS: ' + data.content.join(', '), 'color: green; font-weight: bold');
-        } else if (data.type === 'chat') {
-            console.log(`[${data.sender}]: ${data.content}`);
+        switch (data.type) {
+            case 'userList':
+                console.log('%c ONLINE: ' + data.content.join(', '), 'color: green; font-weight: bold');
+                break;
+            case 'chat':
+                console.log(`[GLOBAL] ${data.sender}: ${data.content}`);
+                break;
+            case 'private':
+                console.log(`%c[PRIVATE] ${data.sender}: ${data.content}`, 'color: magenta; font-weight: bold');
+                break;
+            case 'typing':
+                if (data.isTyping) console.log(`%c... ${data.sender} is typing`, 'color: gray; font-style: italic');
+                break;
+            case 'error':
+                console.error('SERVER ERROR:', data.content);
+                break;
         }
     } catch (e) {
-        console.log('Raw:', event.data);
+        console.log('Raw message:', event.data);
     }
-})
-
-
-// 5. Good practice: Add an error listener to catch connection issues
-wsocket.addEventListener('error', (event) => {
-    console.error('WebSocket error observed:', event);
+});
+wsocket.addEventListener('open', () => {
+    console.log('Connected! Type a message and hit Enter.');
+    console.log('Commands: /msg [User-ID] [text] or just type to broadcast.');
 });
 
-// 6. Close
-wsocket.addEventListener('close', () => {
-    console.log('Disconnected from server.');
+// 6. FIX: Terminal Input (Readline)
+const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: false 
 });
 
+rl.on('line', (line) => {
+    const trimmed = line.trim();
+    if (trimmed) {
+        sendMessage(trimmed);
+    }
+});
+
+// Trigger typing status on any keypress
+process.stdin.on('keypress', () => {
+    handleTyping();
+});
 // To set up your project properly, you can generate a default tsconfig.json
 // automatically or create one manually with the settings optimized for
 // modern Node.js and WebSockets. 

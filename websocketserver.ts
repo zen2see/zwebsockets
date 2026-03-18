@@ -66,9 +66,11 @@ interface CustomWebSocket extends WebSocket {
 
 // Define the interface for consistent data structure
 interface SocketMessage {
-    type: 'chat' | 'userlist'
-    content: any;
-    sender?: string; // Added to identify who sent what
+    type: 'chat' | 'private' | 'userList' | 'typing' | 'error';
+    content?: any;
+    sender?: string;
+    target?: string;
+    isTyping?: boolean;
 }
 
 const wss = new WebSocketServer({ port: 8081 })
@@ -81,16 +83,9 @@ const broadcastUserList = () => {
         if (client.username) users.push(client.username);
     });
 
-    const listMessage: SocketMessage = {
-        type: 'userlist',
-        content: users
-    };
-
-    const payload = JSON.stringify(listMessage);
-    wss.clients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-            client.send(payload);
-        }
+    const payload = JSON.stringify({ type: 'userList', content: users });
+    wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) client.send(payload);
     });
 };
 
@@ -98,63 +93,66 @@ wss.on('connection', (ws: CustomWebSocket) => {
     // Assign a random username (e.g., User-482)
     ws.username = `User-${Math.floor(Math.random() * 1000)}`
     console.log(`${ws.username} joined the chat.`)
-
      // Send the updated list now that someone new joined
     broadcastUserList();
 
     ws.on('message', (data: string) => {
         try {
             // Parse incoming JSON from client
-            const parsed = JSON.parse(data.toString())
+            const parsed: SocketMessage = JSON.parse(data.toString())
+            
+             // 2. Handle Typing Indicators
+            if (parsed.type === 'typing') {
+                const payload = JSON.stringify({ 
+                    type: 'typing', 
+                    sender: ws.username, 
+                    isTyping: parsed.isTyping 
+                });
+                wss.clients.forEach((client: CustomWebSocket) => {
+                    if (client !== ws && client.readyState === WebSocket.OPEN) client.send(payload);
+                });
+            }
+
+            // 3. Handle Private Messages
+            else if (parsed.type === 'private' && parsed.target) {
+                let found = false;
+                const payload = JSON.stringify({ 
+                    type: 'private', 
+                    sender: ws.username, 
+                    content: parsed.content 
+                });
              
-            // Build the broadcast message with the assigned username
-            const broadcastData: SocketMessage = {
-                type: 'chat',
-                content: parsed.content,
-                sender: ws.username,  
-            };
+                 wss.clients.forEach((client: CustomWebSocket) => {
+                    if (client.username === parsed.target) {
+                        client.send(payload);
+                        found = true;
+                    }
+                });
+                
+                ws.send(payload); // Echo back to sender
+                if (!found) ws.send(JSON.stringify({ type: 'error', content: `User ${parsed.target} not found.` }));
+            }
 
-            const payload = JSON.stringify(broadcastData);
-
-            // BROADCASTING LOGIC:
-            // Iterate over all connected clients
-            wss.clients.forEach((client: CustomWebSocket) => {
-                // Only send if the connection is still open
-                if (client.readyState === WebSocket.OPEN) {
-                    client.send(payload)
-                }
-            })
-
-        } catch (error) {
-            console.error(`Invalid JSON from ${ws.username}:`, data.toString())
+            // 4. Handle Global Broadcast
+            else if (parsed.type === 'chat') {
+                const payload = JSON.stringify({ 
+                    type: 'chat', 
+                    sender: ws.username, 
+                    content: parsed.content 
+                });
+                wss.clients.forEach(client => {
+                    if (client.readyState === WebSocket.OPEN) client.send(payload);
+                });
+            }
+        } catch (e) {
+            console.error('Invalid JSON received');
         }
     });
 
     ws.on('close', () => {
-         console.log(`${ws.username} left.`)
-        // Update the list again because someone left
-        broadcastUserList()
-    })
+        console.log(`${ws.username} disconnected.`);
+        broadcastUserList();
+    });
 });
 
-
-// wsocket.addEventListener('message', (event: MessageEvent) => {
-//     try {
-//         const data: SocketMessage = JSON.parse(event.data);
-//         // Display as: [User-123]: Hello!
-//         console.log(`[${data.sender}]: ${data.content}`);
-//     } catch (e) {
-//         console.log('Raw message:', event.data);
-//     }
-// }
-
-console.log('Server with User List running on ws://localhost:8081');
-// wss.on('connection', (ws) => {
-//     console.log('Client cConnected')
-//     ws.send('Welcome!')
-//     ws.on('message', (msg: { toString: () => any }) => {
-//         console.log('Received:', msg.toString())
-//         ws.send(`Echo: $(msg.toString()})`)
-//     })
-//     ws.on('close', () => console.log('Client Disconnected'))
-// })
+console.log('Chat Server running on ws://localhost:8081');
